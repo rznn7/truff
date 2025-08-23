@@ -2,8 +2,10 @@ use leptos_reactive::{
     Scope, SignalGet, SignalUpdate, create_effect, create_runtime, create_scope, create_signal,
 };
 use std::ops::Deref;
-use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{self, Element, Event, console, window};
+use wasm_bindgen::JsCast;
+use web_sys::{self, Element, Event, window};
+
+mod jsx_parser;
 
 fn main() {
     mount(|cx| {

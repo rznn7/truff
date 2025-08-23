@@ -211,6 +211,9 @@ dependencies = [
  "gloo-console",
  "js-sys",
  "leptos_reactive",
+ "proc-macro2",
+ "quote",
+ "syn",
  "wasm-bindgen",
  "web-sys",
 ]

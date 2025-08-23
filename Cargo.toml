@@ -8,6 +8,9 @@ leptos_reactive = { version = "0.2", features = ["stable"] }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 gloo-console = "0.2"
+syn = { version = "2.0", features = ["full", "parsing", "printing"] }
+quote = "1.0"
+proc-macro2 = "1.0"
 
 [dependencies.web-sys]
 version = "0.3"
