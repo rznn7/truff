@@ -9,23 +9,92 @@ mod jsx_parser;
 
 fn main() {
     mount(|cx| {
-        let (count, set_count) = create_signal(cx, 0);
-        El::new("div")
-            .child(
-                El::new("button")
-                    .on("click", move |_| set_count.update(|n| *n -= 1))
-                    .attr("id", "my-button")
-                    .text("-1"),
-            )
-            .text(" Value: ")
-            .dyn_text(cx, move || count.get().to_string())
-            .child(
-                El::new("button")
-                    .on("click", move |_| set_count.update(|n| *n += 1))
-                    .attr("id", "my-button")
-                    .text("+1"),
-            )
+        let ctx = ComponentContext::new(cx);
+
+        El::new("div").component(
+            LoggingCounter {
+                initial: 5,
+                name: "Counter A".to_string(),
+            },
+            &ctx,
+        )
     })
+}
+
+struct LoggingCounter {
+    initial: i32,
+    name: String,
+}
+
+impl Component for LoggingCounter {
+    fn on_init(&mut self, ctx: &ComponentContext) {
+        web_sys::console::log_1(
+            &format!("{} initialized with value {}", self.name, self.initial).into(),
+        );
+        self.initial += 1;
+    }
+
+    fn render(&self, ctx: &ComponentContext) -> El {
+        El::new("div")
+            .child(El::new("div").text(&self.name))
+            .child(El::new("div").text(&self.initial.to_string()))
+    }
+}
+
+struct ComponentContext {
+    scope: Scope,
+}
+
+impl ComponentContext {
+    fn scope(&self) -> Scope {
+        self.scope
+    }
+}
+
+impl ComponentContext {
+    fn new(scope: Scope) -> Self {
+        Self { scope }
+    }
+}
+
+struct CounterComponent {
+    initial: i32,
+}
+
+impl Component for CounterComponent {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let (count, set_count) = create_signal(ctx.scope(), self.initial);
+        El::new("div")
+            .child(El::new("div").dyn_text(ctx.scope(), move || count.get().to_string()))
+            .child(
+                El::new("div")
+                    .child(
+                        El::new("button")
+                            .on("click", move |_| set_count.update(move |n| *n -= 1))
+                            .text("-"),
+                    )
+                    .child(
+                        El::new("button")
+                            .on("click", move |_| set_count.update(move |n| *n += 1))
+                            .text("+"),
+                    ),
+            )
+    }
+}
+
+struct HelloComponent {
+    message: String,
+}
+
+impl Component for HelloComponent {
+    fn render(&self, _cx: &ComponentContext) -> El {
+        El::new("div").text(&self.message)
+    }
+}
+
+trait Component {
+    fn on_init(&mut self, ctx: &ComponentContext) {}
+    fn render(&self, cx: &ComponentContext) -> El;
 }
 
 fn mount(f: impl FnOnce(Scope) -> El + 'static) {
@@ -42,7 +111,7 @@ fn mount(f: impl FnOnce(Scope) -> El + 'static) {
 }
 
 #[derive(Debug, Clone)]
-pub struct El(Element);
+struct El(Element);
 
 impl Deref for El {
     type Target = Element;
@@ -53,7 +122,7 @@ impl Deref for El {
 }
 
 impl El {
-    pub fn new(tag_name: &str) -> Self {
+    fn new(tag_name: &str) -> Self {
         let window = window().unwrap();
         let document = window.document().unwrap();
         let el = document.create_element(tag_name).unwrap();
@@ -100,6 +169,14 @@ impl El {
             let value = f();
             node.set_data(&value);
         });
+        self
+    }
+
+    fn component(self, mut component: impl Component, ctx: &ComponentContext) -> Self {
+        component.on_init(ctx);
+        let el = component.render(ctx);
+        self.0.append_child(&el).unwrap();
+
         self
     }
 }
