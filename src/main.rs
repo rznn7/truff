@@ -1,24 +1,94 @@
 use leptos_reactive::{
     Scope, SignalGet, SignalUpdate, create_effect, create_runtime, create_scope, create_signal,
 };
-use std::ops::Deref;
+use std::{
+    any::{Any, TypeId},
+    cell::RefCell,
+    collections::HashMap,
+    ops::Deref,
+    rc::Rc,
+};
 use wasm_bindgen::JsCast;
 use web_sys::{self, Element, Event, window};
-
-mod jsx_parser;
 
 fn main() {
     mount(|cx| {
         let ctx = ComponentContext::new(cx);
 
-        El::new("div").component(
-            LoggingCounter {
-                initial: 5,
-                name: "Counter A".to_string(),
-            },
-            &ctx,
-        )
+        ctx.provide(ThemeService {
+            primary_color: "blue".to_string(),
+            font_size: "16px".to_string(),
+        });
+
+        ctx.provide(UserService {
+            username: "alice".to_string(),
+            is_admin: true,
+        });
+
+        El::new("div")
+            .component(
+                ThemedButton {
+                    label: "Click me".to_string(),
+                },
+                &ctx,
+            )
+            .component(UserProfile {}, &ctx)
     })
+}
+
+#[derive(Clone)]
+struct ThemeService {
+    primary_color: String,
+    font_size: String,
+}
+
+impl Default for ThemeService {
+    fn default() -> Self {
+        Self {
+            primary_color: "red".to_string(),
+            font_size: "12px".to_string(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct UserService {
+    username: String,
+    is_admin: bool,
+}
+
+struct ThemedButton {
+    label: String,
+}
+
+impl Component for ThemedButton {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let theme = ctx.inject::<ThemeService>().unwrap_or_default();
+
+        El::new("button")
+            .attr(
+                "style",
+                &format!(
+                    "color: {}; font-size: {}",
+                    theme.primary_color, theme.font_size
+                ),
+            )
+            .text(&self.label)
+    }
+}
+
+struct UserProfile;
+impl Component for UserProfile {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let user = ctx.inject::<UserService>();
+
+        match user {
+            Some(u) => {
+                El::new("div").text(&format!("User: {} (admin: {})", u.username, u.is_admin))
+            }
+            None => El::new("div").text("Not logged in"),
+        }
+    }
 }
 
 struct LoggingCounter {
@@ -41,19 +111,54 @@ impl Component for LoggingCounter {
     }
 }
 
+struct ServiceContainer {
+    services: HashMap<TypeId, Box<dyn Any>>,
+}
+
+impl ServiceContainer {
+    fn new() -> Self {
+        Self {
+            services: HashMap::new(),
+        }
+    }
+
+    fn register<T: Any>(&mut self, service: T) {
+        self.services.insert(TypeId::of::<T>(), Box::new(service));
+    }
+
+    fn get<T: Any + Clone>(&self) -> Option<T> {
+        self.services
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+            .cloned()
+    }
+}
+
 struct ComponentContext {
     scope: Scope,
+    services: Rc<RefCell<ServiceContainer>>, // Shared container
 }
 
 impl ComponentContext {
     fn scope(&self) -> Scope {
         self.scope
     }
+
+    fn provide<T: Any>(&self, service: T) {
+        self.services.borrow_mut().register(service);
+    }
+
+    fn inject<T: Any + Clone>(&self) -> Option<T> {
+        self.services.borrow().get::<T>()
+    }
 }
 
 impl ComponentContext {
     fn new(scope: Scope) -> Self {
-        Self { scope }
+        Self {
+            scope,
+            services: Rc::new(RefCell::new(ServiceContainer::new())),
+        }
     }
 }
 
