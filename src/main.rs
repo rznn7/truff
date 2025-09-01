@@ -1,6 +1,4 @@
-use leptos_reactive::{
-    Scope, SignalGet, SignalUpdate, create_effect, create_runtime, create_scope, create_signal,
-};
+use leptos_reactive::{Scope, create_effect, create_runtime, create_scope};
 use std::{
     any::{Any, TypeId},
     cell::RefCell,
@@ -14,107 +12,74 @@ use web_sys::{self, Element, Event, window};
 fn main() {
     mount(|cx| {
         let ctx = ComponentContext::new(cx);
-
-        ctx.provide(ThemeService {
-            primary_color: "blue".to_string(),
-            font_size: "16px".to_string(),
+        ctx.provide(AppConfig {
+            api_url: "https://api.example.com".to_string(),
         });
 
-        ctx.provide(UserService {
-            username: "alice".to_string(),
-            is_admin: true,
-        });
-
-        El::new("div")
-            .component(
-                ThemedButton {
-                    label: "Click me".to_string(),
-                },
-                &ctx,
-            )
-            .component(UserProfile {}, &ctx)
+        El::new("div").component(Dashboard {}, &ctx)
     })
 }
 
 #[derive(Clone)]
-struct ThemeService {
-    primary_color: String,
-    font_size: String,
-}
-
-impl Default for ThemeService {
-    fn default() -> Self {
-        Self {
-            primary_color: "red".to_string(),
-            font_size: "12px".to_string(),
-        }
-    }
+struct AppConfig {
+    api_url: String,
 }
 
 #[derive(Clone)]
-struct UserService {
-    username: String,
-    is_admin: bool,
+struct DashboardSettings {
+    refresh_rate: u32,
 }
 
-struct ThemedButton {
-    label: String,
-}
-
-impl Component for ThemedButton {
+struct Dashboard;
+impl Component for Dashboard {
     fn render(&self, ctx: &ComponentContext) -> El {
-        let theme = ctx.inject::<ThemeService>().unwrap_or_default();
+        ctx.provide(DashboardSettings { refresh_rate: 5000 });
+        let app_config = ctx.inject::<AppConfig>().unwrap();
 
-        El::new("button")
-            .attr(
-                "style",
-                &format!(
-                    "color: {}; font-size: {}",
-                    theme.primary_color, theme.font_size
-                ),
-            )
-            .text(&self.label)
-    }
-}
-
-struct UserProfile;
-impl Component for UserProfile {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        let user = ctx.inject::<UserService>();
-
-        match user {
-            Some(u) => {
-                El::new("div").text(&format!("User: {} (admin: {})", u.username, u.is_admin))
-            }
-            None => El::new("div").text("Not logged in"),
-        }
-    }
-}
-
-struct LoggingCounter {
-    initial: i32,
-    name: String,
-}
-
-impl Component for LoggingCounter {
-    fn on_init(&mut self, ctx: &ComponentContext) {
-        web_sys::console::log_1(
-            &format!("{} initialized with value {}", self.name, self.initial).into(),
-        );
-        self.initial += 1;
-    }
-
-    fn render(&self, ctx: &ComponentContext) -> El {
         El::new("div")
-            .child(El::new("div").text(&self.name))
-            .child(El::new("div").text(&self.initial.to_string()))
+            .child(El::new("h1").text("Dashboard"))
+            .child(El::new("span").text(&format!("url used: {}", app_config.api_url)))
+            .component(MainPanel {}, ctx)
+            .component(Sidebar {}, ctx)
+    }
+}
+
+struct Sidebar;
+impl Component for Sidebar {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let settings = ctx.inject::<DashboardSettings>().unwrap();
+
+        El::new("div")
+            .attr("class", "sidebar")
+            .text(&format!("Sidebar (refresh: {}ms)", settings.refresh_rate))
+    }
+}
+
+struct MainPanel;
+impl Component for MainPanel {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let new_context = ctx.create_child();
+        new_context.provide(DashboardSettings { refresh_rate: 1000 });
+
+        El::new("div")
+            .attr("class", "main-panel")
+            .child(El::new("h2").text("Main Panel"))
+            .component(Widget {}, &new_context)
+    }
+}
+
+struct Widget;
+impl Component for Widget {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let settings = ctx.inject::<DashboardSettings>().unwrap();
+
+        El::new("div").text(&format!("Widget refresh rate: {}ms", settings.refresh_rate))
     }
 }
 
 struct ServiceContainer {
-    services: HashMap<TypeId, Box<dyn Any>>,
+    services: HashMap<TypeId, Rc<dyn Any>>,
 }
-
 impl ServiceContainer {
     fn new() -> Self {
         Self {
@@ -123,25 +88,27 @@ impl ServiceContainer {
     }
 
     fn register<T: Any>(&mut self, service: T) {
-        self.services.insert(TypeId::of::<T>(), Box::new(service));
+        self.services.insert(TypeId::of::<T>(), Rc::new(service));
     }
 
     fn get<T: Any + Clone>(&self) -> Option<T> {
         self.services
             .get(&TypeId::of::<T>())
-            .and_then(|boxed| boxed.downcast_ref::<T>())
+            .and_then(|rc| rc.downcast_ref::<T>())
             .cloned()
     }
 }
 
 struct ComponentContext {
     scope: Scope,
-    services: Rc<RefCell<ServiceContainer>>, // Shared container
+    services: Rc<RefCell<ServiceContainer>>,
 }
-
 impl ComponentContext {
-    fn scope(&self) -> Scope {
-        self.scope
+    fn new(scope: Scope) -> Self {
+        Self {
+            scope,
+            services: Rc::new(RefCell::new(ServiceContainer::new())),
+        }
     }
 
     fn provide<T: Any>(&self, service: T) {
@@ -151,55 +118,24 @@ impl ComponentContext {
     fn inject<T: Any + Clone>(&self) -> Option<T> {
         self.services.borrow().get::<T>()
     }
-}
 
-impl ComponentContext {
-    fn new(scope: Scope) -> Self {
+    fn create_child(&self) -> Self {
+        let mut new_container = ServiceContainer::new();
+
+        for (type_id, service_rc) in &self.services.borrow().services {
+            new_container.services.insert(*type_id, service_rc.clone());
+        }
+
         Self {
-            scope,
-            services: Rc::new(RefCell::new(ServiceContainer::new())),
+            scope: self.scope,
+            services: Rc::new(RefCell::new(new_container)),
         }
     }
 }
 
-struct CounterComponent {
-    initial: i32,
-}
-
-impl Component for CounterComponent {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        let (count, set_count) = create_signal(ctx.scope(), self.initial);
-        El::new("div")
-            .child(El::new("div").dyn_text(ctx.scope(), move || count.get().to_string()))
-            .child(
-                El::new("div")
-                    .child(
-                        El::new("button")
-                            .on("click", move |_| set_count.update(move |n| *n -= 1))
-                            .text("-"),
-                    )
-                    .child(
-                        El::new("button")
-                            .on("click", move |_| set_count.update(move |n| *n += 1))
-                            .text("+"),
-                    ),
-            )
-    }
-}
-
-struct HelloComponent {
-    message: String,
-}
-
-impl Component for HelloComponent {
-    fn render(&self, _cx: &ComponentContext) -> El {
-        El::new("div").text(&self.message)
-    }
-}
-
 trait Component {
-    fn on_init(&mut self, ctx: &ComponentContext) {}
-    fn render(&self, cx: &ComponentContext) -> El;
+    fn on_init(&mut self, _ctx: &ComponentContext) {}
+    fn render(&self, _cx: &ComponentContext) -> El;
 }
 
 fn mount(f: impl FnOnce(Scope) -> El + 'static) {
@@ -217,15 +153,6 @@ fn mount(f: impl FnOnce(Scope) -> El + 'static) {
 
 #[derive(Debug, Clone)]
 struct El(Element);
-
-impl Deref for El {
-    type Target = Element;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 impl El {
     fn new(tag_name: &str) -> Self {
         let window = window().unwrap();
@@ -283,5 +210,13 @@ impl El {
         self.0.append_child(&el).unwrap();
 
         self
+    }
+}
+
+impl Deref for El {
+    type Target = Element;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
