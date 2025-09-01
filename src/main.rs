@@ -1,4 +1,7 @@
-use leptos_reactive::{Scope, create_effect, create_runtime, create_scope};
+use leptos_reactive::{
+    ReadSignal, Scope, SignalGet, SignalSet, SignalUpdate, WriteSignal, create_effect,
+    create_runtime, create_scope, create_signal,
+};
 use std::{
     any::{Any, TypeId},
     cell::RefCell,
@@ -12,74 +15,199 @@ use web_sys::{self, Element, Event, window};
 fn main() {
     mount(|cx| {
         let ctx = ComponentContext::new(cx);
-        ctx.provide(AppConfig {
-            api_url: "https://api.example.com".to_string(),
-        });
-
-        El::new("div").component(Dashboard {}, &ctx)
+        El::new("div").component(AppComponent {}, &ctx)
     })
 }
 
-#[derive(Clone)]
-struct AppConfig {
-    api_url: String,
+// ============= Services =============
+
+struct CounterService {
+    count: (ReadSignal<i32>, WriteSignal<i32>),
+    total_clicks: (ReadSignal<i32>, WriteSignal<i32>),
 }
 
-#[derive(Clone)]
-struct DashboardSettings {
-    refresh_rate: u32,
+impl CounterService {
+    fn new(cx: Scope) -> Self {
+        Self {
+            count: create_signal(cx, 0),
+            total_clicks: create_signal(cx, 0),
+        }
+    }
+
+    fn increment(&self) {
+        self.count.1.update(|n| *n += 1);
+        self.total_clicks.1.update(|n| *n += 1);
+    }
+
+    fn decrement(&self) {
+        self.count.1.update(|n| *n = n.saturating_sub(1));
+        self.total_clicks.1.update(|n| *n += 1);
+    }
+
+    fn reset(&self) {
+        self.count.1.set(0);
+    }
+
+    fn get_count_signal(&self) -> ReadSignal<i32> {
+        self.count.0
+    }
 }
 
+// ============= Components =============
+
+struct AppComponent;
+impl Component for AppComponent {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        ctx.provide(CounterService::new(ctx.scope));
+
+        El::new("div")
+            .attr("style", "padding: 20px; font-family: sans-serif;")
+            .component(Dashboard {}, ctx)
+    }
+}
 struct Dashboard;
 impl Component for Dashboard {
     fn render(&self, ctx: &ComponentContext) -> El {
-        ctx.provide(DashboardSettings { refresh_rate: 5000 });
-        let app_config = ctx.inject::<AppConfig>().unwrap();
+        El::new("div")
+            .child(El::new("h1").text("Angular-like Services Demo"))
+            .child(El::new("hr"))
+            .component(ControlPanel {}, ctx)
+            .component(DisplayPanel {}, ctx)
+            .component(OtherCounterProvider {}, ctx)
+    }
+}
+
+struct ControlPanel;
+impl Component for ControlPanel {
+    fn render(&self, ctx: &ComponentContext) -> El {
+        let counter_service = ctx.inject::<CounterService>().unwrap();
+        let counter_service_inc = counter_service.clone();
+        let counter_service_dec = counter_service.clone();
+        let counter_service_reset = counter_service.clone();
 
         El::new("div")
-            .child(El::new("h1").text("Dashboard"))
-            .child(El::new("span").text(&format!("url used: {}", app_config.api_url)))
-            .component(MainPanel {}, ctx)
-            .component(Sidebar {}, ctx)
+            .attr("style", "margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 8px;")
+            .child(El::new("h2").text("Control Panel"))
+            .child(
+                El::new("button")
+                    .attr("style", "margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer;")
+                    .text("Increment (+1)")
+                    .on("click", move |_| {
+                        counter_service_inc.borrow().increment();
+                    })
+            )
+            .child(
+                El::new("button")
+                    .attr("style", "margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer;")
+                    .text("Decrement (-1)")
+                    .on("click", move |_| {
+                        counter_service_dec.borrow().decrement();
+                    })
+            )
+            .child(
+                El::new("button")
+                    .attr("style", "margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; background: #ff6b6b; color: white; border: none; border-radius: 4px;")
+                    .text("Reset")
+                    .on("click", move |_| {
+                        counter_service_reset.borrow().reset();
+                    })
+            )
     }
 }
 
-struct Sidebar;
-impl Component for Sidebar {
+struct DisplayPanel;
+impl Component for DisplayPanel {
     fn render(&self, ctx: &ComponentContext) -> El {
-        let settings = ctx.inject::<DashboardSettings>().unwrap();
+        let counter_service = ctx.inject::<CounterService>().unwrap();
+        let count_signal = counter_service.borrow().get_count_signal();
+        let counter_service_clicks = counter_service.clone();
 
         El::new("div")
-            .attr("class", "sidebar")
-            .text(&format!("Sidebar (refresh: {}ms)", settings.refresh_rate))
+            .attr(
+                "style",
+                "margin: 20px 0; padding: 15px; background: #e8f4f8; border-radius: 8px;",
+            )
+            .child(El::new("h2").text("Display Panel (Reactive)"))
+            .child(
+                El::new("div")
+                    .attr("style", "font-size: 24px; margin: 10px 0;")
+                    .child(El::new("span").text("Current Count: "))
+                    .child(
+                        El::new("span")
+                            .attr("style", "font-weight: bold; color: #2196F3;")
+                            .dyn_text(ctx.scope, move || count_signal.get().to_string()),
+                    ),
+            )
+            .child(
+                El::new("div")
+                    .attr("style", "font-size: 14px; color: #666;")
+                    .dyn_text(ctx.scope, move || {
+                        format!(
+                            "Total button clicks: {}",
+                            counter_service_clicks.borrow().total_clicks.0.get()
+                        )
+                    }),
+            )
+            .component(NestedCounter, ctx)
     }
 }
 
-struct MainPanel;
-impl Component for MainPanel {
+struct OtherCounterProvider;
+impl Component for OtherCounterProvider {
     fn render(&self, ctx: &ComponentContext) -> El {
-        let new_context = ctx.create_child();
-        new_context.provide(DashboardSettings { refresh_rate: 1000 });
+        let ctx = ctx.create_child();
+        ctx.provide(CounterService::new(ctx.scope));
 
         El::new("div")
-            .attr("class", "main-panel")
-            .child(El::new("h2").text("Main Panel"))
-            .component(Widget {}, &new_context)
+            .attr(
+                "style",
+                "margin: 20px 0; padding: 15px; background: #e19fff; border-radius: 8px;",
+            )
+            .child(El::new("h2").text("Another counter"))
+            .child(El::new("p").text("This component provides and uses its own counter instance"))
+            .component(NestedCounter {}, &ctx)
     }
 }
 
-struct Widget;
-impl Component for Widget {
+struct NestedCounter;
+impl Component for NestedCounter {
     fn render(&self, ctx: &ComponentContext) -> El {
-        let settings = ctx.inject::<DashboardSettings>().unwrap();
+        let counter_service = ctx.inject::<CounterService>().unwrap();
+        let count_signal = counter_service.borrow().get_count_signal();
+        let counter_service_inc = counter_service.clone();
 
-        El::new("div").text(&format!("Widget refresh rate: {}ms", settings.refresh_rate))
+        El::new("div")
+            .attr("style", "display: flex; align-items: center; gap: 10px;")
+            .child(
+                El::new("button")
+                    .attr("style", "padding: 5px 15px; cursor: pointer;")
+                    .text("Nested +1")
+                    .on("click", move |_| {
+                        counter_service_inc.borrow().increment();
+                    }),
+            )
+            .child(
+                El::new("span")
+                    .attr("style", "font-size: 18px;")
+                    .text("Count from nested: "),
+            )
+            .child(
+                El::new("span")
+                    .attr(
+                        "style",
+                        "font-size: 18px; font-weight: bold; color: #ff9800;",
+                    )
+                    .dyn_text(ctx.scope, move || count_signal.get().to_string()),
+            )
     }
 }
+
+// ============= Framework Core =============
 
 struct ServiceContainer {
     services: HashMap<TypeId, Rc<dyn Any>>,
 }
+
 impl ServiceContainer {
     fn new() -> Self {
         Self {
@@ -87,14 +215,17 @@ impl ServiceContainer {
         }
     }
 
-    fn register<T: Any>(&mut self, service: T) {
-        self.services.insert(TypeId::of::<T>(), Rc::new(service));
+    fn register<T: Any + 'static>(&mut self, service: T) {
+        self.services.insert(
+            TypeId::of::<T>(),
+            Rc::new(Rc::new(RefCell::new(service))) as Rc<dyn Any>,
+        );
     }
 
-    fn get<T: Any + Clone>(&self) -> Option<T> {
+    fn get<T: Any + 'static>(&self) -> Option<Rc<RefCell<T>>> {
         self.services
             .get(&TypeId::of::<T>())
-            .and_then(|rc| rc.downcast_ref::<T>())
+            .and_then(|rc| rc.downcast_ref::<Rc<RefCell<T>>>())
             .cloned()
     }
 }
@@ -103,6 +234,7 @@ struct ComponentContext {
     scope: Scope,
     services: Rc<RefCell<ServiceContainer>>,
 }
+
 impl ComponentContext {
     fn new(scope: Scope) -> Self {
         Self {
@@ -111,11 +243,11 @@ impl ComponentContext {
         }
     }
 
-    fn provide<T: Any>(&self, service: T) {
+    fn provide<T: Any + 'static>(&self, service: T) {
         self.services.borrow_mut().register(service);
     }
 
-    fn inject<T: Any + Clone>(&self) -> Option<T> {
+    fn inject<T: Any + 'static>(&self) -> Option<Rc<RefCell<T>>> {
         self.services.borrow().get::<T>()
     }
 
@@ -153,6 +285,7 @@ fn mount(f: impl FnOnce(Scope) -> El + 'static) {
 
 #[derive(Debug, Clone)]
 struct El(Element);
+
 impl El {
     fn new(tag_name: &str) -> Self {
         let window = window().unwrap();
