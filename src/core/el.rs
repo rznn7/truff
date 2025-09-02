@@ -60,6 +60,34 @@ impl El {
         self
     }
 
+    pub fn dyn_child(
+        self,
+        ctx: &ComponentContext,
+        f: impl Fn(&ComponentContext) -> Option<El> + 'static,
+    ) -> Self {
+        let window = window().unwrap();
+        let document = window.document().unwrap();
+
+        let container = document.create_element("div").unwrap();
+        container
+            .set_attribute("style", "display: contents")
+            .unwrap();
+        container.set_attribute("data-dyn-child", "").unwrap();
+
+        self.0.append_child(&container).unwrap();
+
+        let ctx = ctx.create_child();
+
+        create_effect(ctx.scope(), move |_| {
+            container.set_inner_html("");
+            if let Some(value) = f(&ctx) {
+                let _ = container.append_child(&value);
+            }
+        });
+
+        self
+    }
+
     pub fn component(self, mut component: impl Component, ctx: &ComponentContext) -> Self {
         component.on_init(ctx);
         let el = component.render(ctx);
