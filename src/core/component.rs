@@ -4,7 +4,15 @@ use std::{any::Any, cell::RefCell, rc::Rc};
 
 pub trait Component {
     fn on_init(&mut self, _ctx: &ComponentContext) {}
-    fn render(&self, _cx: &ComponentContext) -> El;
+    fn render(&self, ctx: &ComponentContext) -> El;
+
+    fn mount(mut self, ctx: &ComponentContext) -> El
+    where
+        Self: Sized,
+    {
+        self.on_init(ctx);
+        self.render(ctx)
+    }
 }
 
 pub struct ComponentContext {
