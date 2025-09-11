@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use leptos_reactive::{Scope, create_effect};
+use leptos_reactive::create_effect;
 use web_sys::{Element, Event, window};
 
 use crate::core::component::{Component, ComponentContext};
@@ -46,25 +46,31 @@ impl El {
         self
     }
 
-    pub fn dyn_text(self, cx: Scope, f: impl Fn() -> String + 'static) -> Self {
+    pub fn component(self, component: impl Component) -> Self {
+        let el = component.mount();
+        self.0.append_child(&el).unwrap();
+        self
+    }
+
+    pub fn dyn_text(self, f: impl Fn() -> String + 'static) -> Self {
+        let scope = ComponentContext::scope().expect("dyn_text called outside component context");
         let window = window().unwrap();
         let document = window.document().unwrap();
         let node = document.create_text_node("");
 
         self.0.append_child(&node).unwrap();
 
-        create_effect(cx, move |_| {
+        create_effect(scope, move |_| {
             let value = f();
             node.set_data(&value);
         });
         self
     }
 
-    pub fn dyn_child(
-        self,
-        ctx: &ComponentContext,
-        f: impl Fn(&ComponentContext) -> Option<El> + 'static,
-    ) -> Self {
+    pub fn dyn_child(self, f: impl Fn() -> Option<El> + 'static) -> Self {
+        let current_ctx =
+            ComponentContext::current().expect("dyn_child called outside component context");
+        let scope = current_ctx.scope;
         let window = window().unwrap();
         let document = window.document().unwrap();
 
@@ -76,22 +82,16 @@ impl El {
 
         self.0.append_child(&container).unwrap();
 
-        let ctx = ctx.create_child();
+        let child_ctx = current_ctx.create_child();
 
-        create_effect(ctx.scope(), move |_| {
-            container.set_inner_html("");
-            if let Some(value) = f(&ctx) {
-                let _ = container.append_child(&value);
-            }
+        create_effect(scope, move |_| {
+            child_ctx.with(|| {
+                container.set_inner_html("");
+                if let Some(value) = f() {
+                    let _ = container.append_child(&value);
+                }
+            });
         });
-
-        self
-    }
-
-    pub fn component(self, mut component: impl Component, ctx: &ComponentContext) -> Self {
-        component.on_init(ctx);
-        let el = component.render(ctx);
-        self.0.append_child(&el).unwrap();
 
         self
     }

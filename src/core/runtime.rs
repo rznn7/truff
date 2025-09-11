@@ -8,14 +8,16 @@ use crate::core::{
 
 pub fn start_app<T: Component + 'static>(root_component: T) {
     let runtime = create_runtime();
-    let _ = create_scope(runtime, |cx| {
-        let window = window().unwrap();
-        let document = window.document().unwrap();
-        let body = document.body().unwrap();
+    let _scope = create_scope(runtime, |scope| {
+        let root_context = ComponentContext::new(scope);
 
-        let ctx = ComponentContext::new(cx);
-        let root_el = El::new("div").component(root_component, &ctx);
+        root_context.with(|| {
+            let window = window().unwrap();
+            let document = window.document().unwrap();
+            let body = document.body().unwrap();
 
-        body.append_child(&root_el).unwrap();
+            let root_el = El::new("div").component(root_component);
+            body.append_child(&root_el).unwrap();
+        });
     });
 }

@@ -1,156 +1,98 @@
-use leptos_reactive::{
-    ReadSignal, Scope, SignalGet, SignalSet, SignalUpdate, WriteSignal, create_signal,
-};
+use leptos_reactive::{ReadSignal, SignalGet, SignalSet, SignalUpdate, WriteSignal, create_signal};
 
-use crate::core::component::{Component, ComponentContext};
-use crate::core::el::El;
+use crate::core::{
+    component::{Component, ComponentContext},
+    el::El,
+};
 
 // ============= Components =============
 
 pub struct BaseExample;
 impl Component for BaseExample {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        ctx.provide(CounterService::new(ctx.scope()));
-
+    fn render(&self) -> El {
         El::new("div")
-            .attr("style", "padding: 20px; font-family: sans-serif;")
-            .component(Dashboard {}, ctx)
-    }
-}
-
-struct Dashboard;
-impl Component for Dashboard {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        El::new("div")
-            .child(El::new("h1").text("Angular-like Services Demo"))
-            .child(El::new("hr"))
-            .component(ControlPanel {}, ctx)
-            .component(DisplayPanel {}, ctx)
-            .component(OtherCounterProvider {}, ctx)
-    }
-}
-
-struct ControlPanel;
-impl Component for ControlPanel {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        let counter_service = ctx.inject::<CounterService>().unwrap();
-        let counter_service_inc = counter_service.clone();
-        let counter_service_dec = counter_service.clone();
-        let counter_service_reset = counter_service.clone();
-
-        El::new("div")
-            .attr("style", "margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 8px;")
-            .child(El::new("h2").text("Control Panel"))
-            .child(
-                El::new("button")
-                    .attr("style", "margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer;")
-                    .text("Increment (+1)")
-                    .on("click", move |_| {
-                        counter_service_inc.borrow().increment();
-                    })
+            .attr(
+                "style",
+                r#"
+                    display: flex;
+                    width: 100vw;
+                    height: 100vh;
+                    background-color: #f2f2f2
+                "#,
             )
             .child(
-                El::new("button")
-                    .attr("style", "margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer;")
-                    .text("Decrement (-1)")
-                    .on("click", move |_| {
-                        counter_service_dec.borrow().decrement();
-                    })
-            )
-            .child(
-                El::new("button")
-                    .attr("style", "margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; background: #ff6b6b; color: white; border: none; border-radius: 4px;")
-                    .text("Reset")
-                    .on("click", move |_| {
-                        counter_service_reset.borrow().reset();
-                    })
+                El::new("div")
+                    .child(El::new("h1").text("Counters"))
+                    .child(CounterThatProvides {}.mount()),
             )
     }
 }
 
-struct DisplayPanel;
-impl Component for DisplayPanel {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        let counter_service = ctx.inject::<CounterService>().unwrap();
-        let count_signal = counter_service.borrow().get_count_signal();
-        let counter_service_clicks = counter_service.clone();
+pub struct CounterThatProvides;
+impl Component for CounterThatProvides {
+    fn render(&self) -> El {
+        ComponentContext::provide(CounterService::new());
+        let counter_service = ComponentContext::inject::<CounterService>().unwrap();
+        let counter_increment = counter_service.clone();
+        let counter_display = counter_service.clone();
 
         El::new("div")
             .attr(
                 "style",
-                "margin: 20px 0; padding: 15px; background: #e8f4f8; border-radius: 8px;",
+                r#"
+                         display: flex;
+                         flex-direction: column;
+                         gap: 5px;
+                         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                         border-radius: 5px;
+                         background-color: #fff;
+                         padding: 5px;
+                "#,
             )
-            .child(El::new("h2").text("Display Panel"))
+            .child(El::new("h2").text("Component A"))
+            .child(El::new("span").text("I am provinding counter service."))
             .child(
                 El::new("div")
-                    .attr("style", "font-size: 24px; margin: 10px 0;")
-                    .child(El::new("span").text("Current Count: "))
-                    .child(
-                        El::new("span")
-                            .attr("style", "font-weight: bold; color: #2196F3;")
-                            .dyn_text(ctx.scope(), move || count_signal.get().to_string()),
-                    ),
-            )
-            .child(
-                El::new("div")
-                    .attr("style", "font-size: 14px; color: #666;")
-                    .dyn_text(ctx.scope(), move || {
+                    .attr("style", "display: flex; flex-direction: column; gap: 10px")
+                    .child(El::new("button").text("+1").on("click", move |_| {
+                        counter_increment.borrow().increment();
+                    }))
+                    .child(El::new("span").attr("style", "").dyn_text(move || {
                         format!(
-                            "Total button clicks: {}",
-                            counter_service_clicks.borrow().total_clicks.0.get()
+                            "Count is: {}",
+                            counter_display.borrow().get_count_signal().get()
                         )
-                    }),
+                    })),
             )
-            .component(NestedCounter, ctx)
+            .component(CounterInjectedInto {})
     }
 }
 
-struct OtherCounterProvider;
-impl Component for OtherCounterProvider {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        let ctx = ctx.create_child();
-        ctx.provide(CounterService::new(ctx.scope()));
+struct CounterInjectedInto;
+impl Component for CounterInjectedInto {
+    fn render(&self) -> El {
+        let counter_service = ComponentContext::inject::<CounterService>().unwrap();
+        let counter_decrement = counter_service.clone();
 
         El::new("div")
             .attr(
                 "style",
-                "margin: 20px 0; padding: 15px; background: #f4ddff; border-radius: 8px;",
+                r#"
+                         display: flex;
+                         flex-direction: column;
+                         gap: 5px;
+                         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                         border-radius: 5px;
+                         background-color: #f9d4ff;
+                         padding: 5px;
+                "#,
             )
-            .child(El::new("h2").text("Another counter"))
-            .child(El::new("p").text("This component provides and uses its own counter instance"))
-            .component(NestedCounter {}, &ctx)
-    }
-}
-
-struct NestedCounter;
-impl Component for NestedCounter {
-    fn render(&self, ctx: &ComponentContext) -> El {
-        let counter_service = ctx.inject::<CounterService>().unwrap();
-        let count_signal = counter_service.borrow().get_count_signal();
-        let counter_service_inc = counter_service.clone();
-
-        El::new("div")
-            .attr("style", "display: flex; align-items: center; gap: 10px;")
+            .child(El::new("h2").text("Component B"))
+            .child(El::new("span").text("I am using counter service from my parent."))
             .child(
                 El::new("button")
-                    .attr("style", "padding: 5px 15px; cursor: pointer;")
-                    .text("Nested +1")
-                    .on("click", move |_| {
-                        counter_service_inc.borrow().increment();
-                    }),
-            )
-            .child(
-                El::new("span")
-                    .attr("style", "font-size: 18px;")
-                    .text("Count from nested: "),
-            )
-            .child(
-                El::new("span")
-                    .attr(
-                        "style",
-                        "font-size: 18px; font-weight: bold; color: #ff9800;",
-                    )
-                    .dyn_text(ctx.scope(), move || count_signal.get().to_string()),
+                    .text("-1")
+                    .on("click", move |_| counter_decrement.borrow().decrement()),
             )
     }
 }
@@ -162,10 +104,12 @@ struct CounterService {
     total_clicks: (ReadSignal<i32>, WriteSignal<i32>),
 }
 impl CounterService {
-    fn new(cx: Scope) -> Self {
+    fn new() -> Self {
+        let scope = ComponentContext::scope().unwrap();
+
         Self {
-            count: create_signal(cx, 0),
-            total_clicks: create_signal(cx, 0),
+            count: create_signal(scope, 0),
+            total_clicks: create_signal(scope, 0),
         }
     }
 
